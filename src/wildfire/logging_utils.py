@@ -19,6 +19,7 @@ Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 Domain:
   x: [{cfg.domain.x_min}, {cfg.domain.x_max}]
   y: [{cfg.domain.y_min}, {cfg.domain.y_max}]
+  z: [{cfg.domain.z_min}, {cfg.domain.z_max}]
   t: [{cfg.domain.t_min}, {cfg.domain.t_max}]
 
 PINN Model:
@@ -45,7 +46,8 @@ Training:
         log += f"""Asensio Model Parameters:
   Initial condition:
     center: ({asensio.center[0]}, {asensio.center[1]})
-    radius: {asensio.radius}
+    sx: {asensio.sx}
+    sy: {asensio.sy}
   Temperature:
     T0: {asensio.T0}
     T_inf: {asensio.T_inf}
@@ -59,6 +61,26 @@ Training:
     A: {asensio.A}
   Boundary conditions: {asensio.bc_type}
   Velocity: ({asensio.vx}, {asensio.vy})
+"""
+    elif model_type == "mass_conservation" and cfg.pde.mass_conservation_config:
+        mass = cfg.pde.mass_conservation_config
+        log += f"""Mass Conservation Parameters:
+  Coefficients:
+    a1: {mass.a1}
+    a2: {mass.a2}
+    l: {mass.l}
+  Reference profile:
+    z0: {mass.z0}
+    U0: {mass.U0}
+    V0: {mass.V0}
+    W0: {mass.W0}
+  Topography:
+    height: {mass.topo_height}
+    center: ({mass.topo_center[0]}, {mass.topo_center[1]})
+    sigma_x: {mass.topo_sigma_x}
+    sigma_y: {mass.topo_sigma_y}
+    base: {mass.topo_base}
+  Boundary conditions: {mass.bc_type}
 """
     else:
         lsm = cfg.pde.lsm_config if cfg.pde.lsm_config else None

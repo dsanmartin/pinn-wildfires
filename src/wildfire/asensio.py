@@ -16,7 +16,8 @@ class AsensioConfigBK:
     T0: float = 300.0 # Ambient temperature
     T_inf: float = 1200.0 # Peak temperature
     center: tuple[float, float] = (0.5, 0.5) # Center of initial heat source
-    radius: float = 0.5 # Radius of initial heat source
+    sx: float = 0.5 # Gaussian width in x-direction
+    sy: float = 0.5 # Gaussian width in y-direction
     vx: float = 0.0 # Wind velocity in x-direction
     vy: float = 0.0 # Wind velocity in y-direction
     k: float = 0.02476  # Thermal conductivity
@@ -35,7 +36,8 @@ class AsensioConfig:
     T_ign: float = 2  # Ignition temperature
     T_act: float = 1  # Activation temperature
     center: tuple[float, float] = (5, 5) # Center of initial heat source
-    radius: float = 2 # Radius of initial heat source
+    sx: float = 2 # Gaussian width in x-direction
+    sy: float = 2 # Gaussian width in y-direction
     vx: float = 0.0 # Wind velocity in x-direction
     vy: float = 0.0 # Wind velocity in y-direction
     k: float = 1  # Thermal conductivity
@@ -91,7 +93,9 @@ class Asensio:
         cx, cy = self.config.center
         T0 = self.config.T0
         T_inf = self.config.T_inf
-        T_ic = T0 + (T_inf - T0) * torch.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * self.config.radius**2))
+        sx = self.config.sx
+        sy = self.config.sy
+        T_ic = T0 + (T_inf - T0) * torch.exp(-(((x - cx) ** 2) / (2 * sx**2) + ((y - cy) ** 2) / (2 * sy**2)))
         Y_ic = torch.ones_like(T_ic) * 0
         return torch.cat([T_ic, Y_ic], dim=1)
 

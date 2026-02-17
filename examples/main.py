@@ -5,7 +5,7 @@ from configparser import ConfigParser
 from datetime import datetime
 from pathlib import Path
 
-from wildfire.plot import plot_perimeter_comparison, plot_phi_comparison, plot_temperature_comparison, plot_fuel_fraction_comparison, plot_training_loss
+from wildfire.plot import plot_perimeter_comparison, plot_phi_comparison, plot_temperature_comparison, plot_fuel_fraction_comparison, plot_training_loss, plot_mass_conservation_comparison
 from wildfire.logging_utils import write_config_log
 from wildfire.pde import PDEConfig
 from wildfire.lsm import LSMConfig
@@ -13,6 +13,7 @@ from wildfire.asensio import AsensioConfig
 from wildfire.train import ExperimentConfig, train
 from wildfire.pinn import MLPConfig
 from wildfire.utils import Domain, TrainConfig
+from wildfire.mass_conservation import MassConservationConfig
 
 
 def _build_parser() -> ArgumentParser:
@@ -25,6 +26,8 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument("--x-max", type=float, default=None)
     parser.add_argument("--y-min", type=float, default=None)
     parser.add_argument("--y-max", type=float, default=None)
+    parser.add_argument("--z-min", type=float, default=None)
+    parser.add_argument("--z-max", type=float, default=None)
     parser.add_argument("--t-min", type=float, default=None)
     parser.add_argument("--t-max", type=float, default=None)
 
@@ -44,6 +47,8 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument("--center-x", type=float, default=None)
     parser.add_argument("--center-y", type=float, default=None)
     parser.add_argument("--radius", type=float, default=None)
+    parser.add_argument("--sx", type=float, default=None)
+    parser.add_argument("--sy", type=float, default=None)
 
     # Velocity parameters
     parser.add_argument("--vx", type=float, default=None)
@@ -67,6 +72,7 @@ def main() -> None:
     base_train = TrainConfig()
     base_lsm_config = LSMConfig()  # Default LSM config
     base_asensio_config = AsensioConfig()  # Default Asensio config
+    base_mass_config = MassConservationConfig()  # Default Mass Conservation config
     cfg_file = _read_config(args.config)
 
     if cfg_file is not None and cfg_file.has_section("domain"):
@@ -75,6 +81,8 @@ def main() -> None:
             x_max=cfg_file.getfloat("domain", "x_max", fallback=base_domain.x_max),
             y_min=cfg_file.getfloat("domain", "y_min", fallback=base_domain.y_min),
             y_max=cfg_file.getfloat("domain", "y_max", fallback=base_domain.y_max),
+            z_min=cfg_file.getfloat("domain", "z_min", fallback=base_domain.z_min),
+            z_max=cfg_file.getfloat("domain", "z_max", fallback=base_domain.z_max),
             t_min=cfg_file.getfloat("domain", "t_min", fallback=base_domain.t_min),
             t_max=cfg_file.getfloat("domain", "t_max", fallback=base_domain.t_max),
         )
@@ -85,6 +93,13 @@ def main() -> None:
             n_boundary=cfg_file.getint("train", "n_boundary", fallback=base_train.n_boundary),
             n_initial=cfg_file.getint("train", "n_initial", fallback=base_train.n_initial),
             lr_adam=cfg_file.getfloat("train", "lr_adam", fallback=base_train.lr_adam),
+            lr_factor=cfg_file.getfloat("train", "lr_factor", fallback=base_train.lr_factor),
+            lr_min=cfg_file.getfloat("train", "lr_min", fallback=base_train.lr_min),
+            lr_patience_adam=cfg_file.getint("train", "lr_patience_adam", fallback=base_train.lr_patience_adam),
+            lr_patience_lbfgs=cfg_file.getint("train", "lr_patience_lbfgs", fallback=base_train.lr_patience_lbfgs),
+            early_stop_patience_adam=cfg_file.getint("train", "early_stop_patience_adam", fallback=base_train.early_stop_patience_adam),
+            early_stop_patience_lbfgs=cfg_file.getint("train", "early_stop_patience_lbfgs", fallback=base_train.early_stop_patience_lbfgs),
+            early_stop_min_delta=cfg_file.getfloat("train", "early_stop_min_delta", fallback=base_train.early_stop_min_delta),
             epochs_adam=cfg_file.getint("train", "epochs_adam", fallback=base_train.epochs_adam),
             epochs_lbfgs=cfg_file.getint("train", "epochs_lbfgs", fallback=base_train.epochs_lbfgs),
             lr_lbfgs=cfg_file.getfloat("train", "lr_lbfgs", fallback=base_train.lr_lbfgs),
@@ -111,8 +126,13 @@ def main() -> None:
 
     if cfg_file is not None and cfg_file.has_section("pde"):
         model_type = cfg_file.get("pde", "model_type", fallback="lsm")
+
+        print(model_type)
         
         if model_type.lower() == "asensio":
+            fallback_radius = cfg_file.getfloat("initial", "radius", fallback=None)
+            sx = cfg_file.getfloat("initial", "sx", fallback=base_asensio_config.sx if fallback_radius is None else fallback_radius)
+            sy = cfg_file.getfloat("initial", "sy", fallback=base_asensio_config.sy if fallback_radius is None else fallback_radius)
             asensio_cfg = AsensioConfig(
                 T0=cfg_file.getfloat("pde", "T0", fallback=base_asensio_config.T0),
                 T_inf=cfg_file.getfloat("pde", "T_inf", fallback=base_asensio_config.T_inf),
@@ -120,7 +140,8 @@ def main() -> None:
                     cfg_file.getfloat("initial", "center_x", fallback=base_asensio_config.center[0]),
                     cfg_file.getfloat("initial", "center_y", fallback=base_asensio_config.center[1]),
                 ),
-                radius=cfg_file.getfloat("initial", "radius", fallback=base_asensio_config.radius),
+                sx=sx,
+                sy=sy,
                 vx=cfg_file.getfloat("pde", "vx", fallback=base_asensio_config.vx),
                 vy=cfg_file.getfloat("pde", "vy", fallback=base_asensio_config.vy),
                 k=cfg_file.getfloat("pde", "k", fallback=base_asensio_config.k),
@@ -132,6 +153,27 @@ def main() -> None:
                 bc_type=cfg_file.get("pde", "bc_type", fallback=base_asensio_config.bc_type),
             )
             base_lsm = PDEConfig(model_type="asensio", asensio_config=asensio_cfg)
+        elif model_type.lower() == "mass_conservation":
+            initial_section = "initial" if cfg_file.has_section("initial") else "pde"
+            mass_cfg = MassConservationConfig(
+                a1=cfg_file.getfloat("pde", "a1", fallback=base_mass_config.a1),
+                a2=cfg_file.getfloat("pde", "a2", fallback=base_mass_config.a2),
+                l=cfg_file.getfloat("pde", "l", fallback=base_mass_config.l),
+                z0=cfg_file.getfloat(initial_section, "z0", fallback=cfg_file.getfloat("pde", "z0", fallback=base_mass_config.z0)),
+                U0=cfg_file.getfloat(initial_section, "U0", fallback=cfg_file.getfloat("pde", "U0", fallback=base_mass_config.U0)),
+                V0=cfg_file.getfloat(initial_section, "V0", fallback=cfg_file.getfloat("pde", "V0", fallback=base_mass_config.V0)),
+                W0=cfg_file.getfloat(initial_section, "W0", fallback=cfg_file.getfloat("pde", "W0", fallback=base_mass_config.W0)),
+                topo_height=cfg_file.getfloat(initial_section, "topo_height", fallback=cfg_file.getfloat("pde", "topo_height", fallback=base_mass_config.topo_height)),
+                topo_sigma_x=cfg_file.getfloat(initial_section, "topo_sigma_x", fallback=cfg_file.getfloat("pde", "topo_sigma_x", fallback=base_mass_config.topo_sigma_x)),
+                topo_sigma_y=cfg_file.getfloat(initial_section, "topo_sigma_y", fallback=cfg_file.getfloat("pde", "topo_sigma_y", fallback=base_mass_config.topo_sigma_y)),
+                topo_base=cfg_file.getfloat(initial_section, "topo_base", fallback=cfg_file.getfloat("pde", "topo_base", fallback=base_mass_config.topo_base)),
+                topo_center=(
+                    cfg_file.getfloat(initial_section, "topo_center_x", fallback=cfg_file.getfloat("pde", "topo_center_x", fallback=base_mass_config.topo_center[0])),
+                    cfg_file.getfloat(initial_section, "topo_center_y", fallback=cfg_file.getfloat("pde", "topo_center_y", fallback=base_mass_config.topo_center[1])),
+                ),
+                bc_type=cfg_file.get("pde", "bc_type", fallback=base_mass_config.bc_type),
+            )
+            base_lsm = PDEConfig(model_type="mass_conservation", mass_conservation_config=mass_cfg)
         else:
             lsm_cfg = LSMConfig(
                 speed=cfg_file.getfloat("pde", "speed", fallback=base_lsm_config.speed),
@@ -156,6 +198,8 @@ def main() -> None:
         x_max=base_domain.x_max if args.x_max is None else args.x_max,
         y_min=base_domain.y_min if args.y_min is None else args.y_min,
         y_max=base_domain.y_max if args.y_max is None else args.y_max,
+        z_min=base_domain.z_min if args.z_min is None else args.z_min,
+        z_max=base_domain.z_max if args.z_max is None else args.z_max,
         t_min=base_domain.t_min if args.t_min is None else args.t_min,
         t_max=base_domain.t_max if args.t_max is None else args.t_max,
     )
@@ -164,6 +208,13 @@ def main() -> None:
         n_boundary=base_train.n_boundary if args.n_boundary is None else args.n_boundary,
         n_initial=base_train.n_initial if args.n_initial is None else args.n_initial,
         lr_adam=base_train.lr_adam if args.lr_adam is None else args.lr_adam,
+        lr_factor=base_train.lr_factor,
+        lr_min=base_train.lr_min,
+        lr_patience_adam=base_train.lr_patience_adam,
+        lr_patience_lbfgs=base_train.lr_patience_lbfgs,
+        early_stop_patience_adam=base_train.early_stop_patience_adam,
+        early_stop_patience_lbfgs=base_train.early_stop_patience_lbfgs,
+        early_stop_min_delta=base_train.early_stop_min_delta,
         epochs_adam=base_train.epochs_adam if args.epochs_adam is None else args.epochs_adam,
         epochs_lbfgs=base_train.epochs_lbfgs if args.epochs_lbfgs is None else args.epochs_lbfgs,
         lr_lbfgs=base_train.lr_lbfgs if args.lr_lbfgs is None else args.lr_lbfgs,
@@ -172,11 +223,23 @@ def main() -> None:
         weight_ic=base_train.weight_ic if args.weight_ic is None else args.weight_ic,
     )
     pde_cfg = base_lsm
+    if pde_cfg.model_type.lower() == "asensio" and pde_cfg.asensio_config:
+        if args.sx is not None:
+            pde_cfg.asensio_config.sx = args.sx
+        if args.sy is not None:
+            pde_cfg.asensio_config.sy = args.sy
 
     # Set PINN output size based on model type
     # LSM: 1 output (level set function)
     # Asensio: 2 outputs (temperature and fuel fraction)
-    output_size = 2 if pde_cfg.model_type.lower() == "asensio" else 1
+    # Mass conservation: 3 outputs (u, v, w)
+    model_type = pde_cfg.model_type.lower()
+    if model_type == "asensio":
+        output_size = 2
+    elif model_type == "mass_conservation":
+        output_size = 3
+    else:
+        output_size = 1
     model_cfg = MLPConfig(layers=(3, 64, 64, 64, output_size))
 
     cfg = ExperimentConfig(domain=domain, train=train_cfg, model=model_cfg, pde=pde_cfg)
@@ -197,6 +260,8 @@ def main() -> None:
     if cfg.pde.model_type.lower() == "asensio":
         plot_temperature_comparison(model, cfg.domain, out_dir / "temperature_comparison.png", pde_cfg=cfg.pde)
         plot_fuel_fraction_comparison(model, cfg.domain, out_dir / "fuel_fraction_comparison.png", pde_cfg=cfg.pde)
+    elif cfg.pde.model_type.lower() == "mass_conservation":
+        plot_mass_conservation_comparison(model, cfg.domain, out_dir, pde_cfg=cfg.pde)
     else:
         plot_phi_comparison(model, cfg.domain, out_dir / "phi_comparison.png", lsm=cfg.pde)
         plot_perimeter_comparison(model, cfg.domain, out_dir / "perimeter_comparison.png", lsm=cfg.pde)

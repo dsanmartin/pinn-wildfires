@@ -27,6 +27,24 @@ def _grid(domain: Domain, resolution: int, t: float, device: torch.device) -> to
     return xyt
 
 
+def _grid_xz_at_y(domain: Domain, resolution: int, y_value: float, device: torch.device) -> torch.Tensor:
+    xs = torch.linspace(domain.x_min, domain.x_max, resolution, device=device)
+    zs = torch.linspace(domain.z_min, domain.z_max, resolution, device=device)
+    xx, zz = torch.meshgrid(xs, zs, indexing="xy")
+    yy = torch.full_like(xx, y_value)
+    xyz = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
+    return xyz
+
+
+def _grid_yz_at_x(domain: Domain, resolution: int, x_value: float, device: torch.device) -> torch.Tensor:
+    ys = torch.linspace(domain.y_min, domain.y_max, resolution, device=device)
+    zs = torch.linspace(domain.z_min, domain.z_max, resolution, device=device)
+    yy, zz = torch.meshgrid(ys, zs, indexing="xy")
+    xx = torch.full_like(yy, x_value)
+    xyz = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
+    return xyz
+
+
 def _plot_field(
     field: np.ndarray,
     domain: Domain,
@@ -380,6 +398,70 @@ def plot_fuel_fraction_comparison(
     else:
         plt.show()
     plt.close(fig)
+
+
+def plot_mass_conservation_comparison(
+    model: torch.nn.Module,
+    domain: Domain,
+    out_dir: str | Path,
+    cfg: PlotConfig | None = None,
+    pde_cfg: PDEConfig | None = None,
+) -> None:
+    cfg = cfg or PlotConfig()
+    pde_cfg = pde_cfg or PDEConfig(model_type="mass_conservation")
+    pde = PDE(pde_cfg)
+    device = next(model.parameters()).device
+    out_dir = Path(out_dir)
+
+    y_fixed = domain.y_max - domain.y_min
+    x_fixed = domain.x_max - domain.x_min
+
+    def plot_field(field_name: str, field_index: int, plane: str, fixed_value: float) -> None:
+        if plane == "xz":
+            xyz_init = _grid_xz_at_y(domain, cfg.resolution, fixed_value, torch.device("cpu"))
+            xyz_final = _grid_xz_at_y(domain, cfg.resolution, fixed_value, device)
+            x_vals = np.linspace(domain.x_min, domain.x_max, cfg.resolution)
+            y_vals = np.linspace(domain.z_min, domain.z_max, cfg.resolution)
+            xlabel = r"$x$"
+            ylabel = r"$z$"
+        else:
+            xyz_init = _grid_yz_at_x(domain, cfg.resolution, fixed_value, torch.device("cpu"))
+            xyz_final = _grid_yz_at_x(domain, cfg.resolution, fixed_value, device)
+            x_vals = np.linspace(domain.y_min, domain.y_max, cfg.resolution)
+            y_vals = np.linspace(domain.z_min, domain.z_max, cfg.resolution)
+            xlabel = r"$y$"
+            ylabel = r"$z$"
+
+        ic = pde.initial_condition(xyz_init)
+        init_field = ic[:, field_index].reshape(cfg.resolution, cfg.resolution).detach().cpu().numpy()
+        with torch.no_grad():
+            final_out = model(xyz_final)
+            final_field = final_out[:, field_index].reshape(cfg.resolution, cfg.resolution).detach().cpu().numpy()
+
+        vmin = float(min(init_field.min(), final_field.min()))
+        vmax = float(max(init_field.max(), final_field.max()))
+
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharex=True, sharey=True)
+        xx, yy = np.meshgrid(x_vals, y_vals, indexing="xy")
+
+        im0 = axes[0].contourf(xx, yy, init_field, levels=50, cmap=cfg.cmap, vmin=vmin, vmax=vmax)
+        axes[0].set_title(f"{field_name}(initial)")
+        axes[0].set_xlabel(xlabel)
+        axes[0].set_ylabel(ylabel)
+
+        im1 = axes[1].contourf(xx, yy, final_field, levels=50, cmap=cfg.cmap, vmin=vmin, vmax=vmax)
+        axes[1].set_title(f"{field_name}(final)")
+        axes[1].set_xlabel(xlabel)
+
+        fig.colorbar(im1, ax=axes.ravel().tolist(), shrink=0.85)
+        out_path = out_dir / f"mass_{field_name.lower()}_comparison.png"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    plot_field("u", 0, "xz", y_fixed)
+    plot_field("v", 1, "yz", x_fixed)
+    plot_field("w", 2, "xz", y_fixed)
 
 
 def plot_training_loss(
